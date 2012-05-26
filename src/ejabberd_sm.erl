@@ -485,32 +485,58 @@ do_route(From, To, Packet) ->
 		    ok
 	    end;
 	_ ->
-	    USR = {LUser, LServer, LResource},
-	    case mnesia:dirty_index_read(session, USR, #session.usr) of
-		[] ->
-		    case Name of
-			"message" ->
-			    route_message(From, To, Packet);
-			"iq" ->
-			    case xml:get_attr_s("type", Attrs) of
-				"error" -> ok;
-				"result" -> ok;
-				_ ->
-				    Err =
-					jlib:make_error_reply(
-					  Packet, ?ERR_SERVICE_UNAVAILABLE),
-				    ejabberd_router:route(To, From, Err)
-			    end;
-			_ ->
-			    ?DEBUG("packet droped~n", [])
-		    end;
-		Ss ->
-		    Session = lists:max(Ss),
-		    Pid = element(2, Session#session.sid),
-		    ?DEBUG("sending to process ~p~n", [Pid]),
-		    Pid ! {route, From, To, Packet}
-	    end
-    end.
+      case Name of
+        "message" ->
+        %% GDR! %%
+        PrioRes = get_user_present_resources(LUser, LServer),
+        lists:foreach(
+          fun({P, R}) when P >= 0 ->
+        %% /GDR! %%
+            USR = {LUser, LServer, jlib:resourceprep(R)},
+            case mnesia:dirty_index_read(session, USR, #session.usr) of
+            [] ->
+                route_message(From, To, Packet);
+            Ss -> % Session found
+                Session = lists:max(Ss),
+                Pid = element(2, Session#session.sid),
+                ?DEBUG("sending to process ~p~n", [Pid]),
+                Pid ! {route, From, 
+                  jlib:jid_replace_resource(To, R),
+                  Packet}
+		      end;
+		 %% Ignore other priority:
+		 ({_Prio, _Res}) ->
+		      ok
+	      end,
+          PrioRes); % loop.foreach
+      _ ->
+          USR = {LUser, LServer, LResource},
+          case mnesia:dirty_index_read(session, USR, #session.usr) of
+          [] ->
+              case Name of
+              "message" ->
+                  route_message(From, To, Packet);
+              "iq" ->
+                  case xml:get_attr_s("type", Attrs) of
+                  "error" -> ok;
+                  "result" -> ok;
+                  _ ->
+                      Err =
+                      jlib:make_error_reply(
+                        Packet, ?ERR_SERVICE_UNAVAILABLE),
+                      ejabberd_router:route(To, From, Err)
+                  end;
+              _ ->
+                  ?DEBUG("packet droped~n", [])
+              end;
+          Ss -> % Session found
+              Session = lists:max(Ss),
+              Pid = element(2, Session#session.sid),
+              ?DEBUG("sending to process ~p~n", [Pid]),
+              Pid ! {route, From, To, Packet}
+          end
+      end
+end.
 
 %% The default list applies to the user as a whole,
 %% and is processed if there is no active list set

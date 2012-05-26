@@ -302,27 +302,18 @@ do_route(From, To, Packet) ->
     if
 	To#jid.luser /= "" ->
 	    ejabberd_sm:route(From, To, Packet);
-	To#jid.lresource == "" ->
+	true ->
 	    {xmlelement, Name, _Attrs, _Els} = Packet,
+		ResourcelessTo = To#jid{lresource=""},
 	    case Name of
 		"iq" ->
-		    process_iq(From, To, Packet);
+		    process_iq(From, ResourcelessTo, Packet);
 		"message" ->
 		    ok;
 		"presence" ->
 		    ok;
 		_ ->
 		    ok
-	    end;
-	true ->
-	    {xmlelement, _Name, Attrs, _Els} = Packet,
-	    case xml:get_attr_s("type", Attrs) of
-		"error" -> ok;
-		"result" -> ok;
-		_ ->
-		    ejabberd_hooks:run(local_send_to_resource_hook,
-				       To#jid.lserver,
-				       [From, To, Packet])
 	    end
 	end.
 
